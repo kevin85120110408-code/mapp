@@ -10,6 +10,10 @@
     <script src="https://unpkg.com/globe.gl"></script>
     <!-- EmailJS -->
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <!-- Supabase 客户端 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Supabase 配置 -->
+    <script src="supabase-config.js"></script>
     <style>
         :root {
             --bg-primary: #000000;
@@ -283,7 +287,9 @@
             color: var(--text-primary);
         }
 
-        .form-group input {
+        .form-group input[type="email"],
+        .form-group input[type="password"],
+        .form-group input[type="text"] {
             width: 100%;
             padding: 0.875rem 1.125rem;
             background: var(--bg-tertiary);
@@ -294,14 +300,18 @@
             transition: all 0.2s ease;
         }
 
-        .form-group input:focus {
+        .form-group input[type="email"]:focus,
+        .form-group input[type="password"]:focus,
+        .form-group input[type="text"]:focus {
             outline: none;
             border-color: var(--accent);
             background: var(--bg-primary);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
-        .form-group input::placeholder {
+        .form-group input[type="email"]::placeholder,
+        .form-group input[type="password"]::placeholder,
+        .form-group input[type="text"]::placeholder {
             color: var(--text-secondary);
         }
 
@@ -309,6 +319,33 @@
             font-size: 0.75rem;
             color: var(--text-secondary);
             margin-top: 0.5rem;
+        }
+
+        /* 记住我复选框 - 简洁蓝色风格 */
+        .remember-me-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.625rem;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.875rem;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.8);
+            padding: 0.375rem 0;
+            transition: color 0.2s ease;
+        }
+
+        .remember-me-checkbox {
+            width: 17px;
+            height: 17px;
+            cursor: pointer;
+            accent-color: #4a9eff;
+            margin: 0;
+            flex-shrink: 0;
+        }
+
+        .remember-me-label:hover {
+            color: rgba(255, 255, 255, 1);
         }
 
         .btn-primary {
@@ -484,10 +521,10 @@
                     <label>密码</label>
                     <input type="password" id="login-password" required>
                 </div>
-                <div class="form-group" style="margin-bottom: 1rem;">
-                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500;">
-                        <input type="checkbox" id="remember-me" style="width: auto; cursor: pointer;">
-                        <span style="font-size: 0.875rem;">记住我（自动登录）</span>
+                <div style="margin-bottom: 1.5rem;">
+                    <label class="remember-me-label">
+                        <input type="checkbox" id="remember-me" class="remember-me-checkbox">
+                        <span>记住我（自动登录）</span>
                     </label>
                 </div>
                 <button type="submit" class="btn-primary">登录</button>
@@ -595,6 +632,26 @@
             }
         })();
 
+        // ==================== Supabase 初始化 ====================
+        let supabase = null;
+        let realtimeChannel = null;
+
+        // 检查 Supabase 配置
+        const isSupabaseConfigured = SUPABASE_CONFIG &&
+            SUPABASE_CONFIG.URL !== 'YOUR_SUPABASE_URL' &&
+            SUPABASE_CONFIG.ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
+
+        if (isSupabaseConfigured) {
+            // 初始化 Supabase 客户端
+            supabase = window.supabase.createClient(
+                SUPABASE_CONFIG.URL,
+                SUPABASE_CONFIG.ANON_KEY
+            );
+            console.log('✅ Supabase 已初始化 - 实时模式');
+        } else {
+            console.warn('⚠️ Supabase 未配置 - 使用本地存储模式');
+        }
+
         // ==================== 数据存储 ====================
         const STORAGE_KEYS = {
             USERS: 'globe_users',
@@ -606,15 +663,34 @@
         // 临时存储注册信息
         let tempRegisterData = null;
 
-        // 获取所有用户
-        function getAllUsers() {
-            const users = localStorage.getItem(STORAGE_KEYS.USERS);
-            return users ? JSON.parse(users) : [];
+        // 获取所有用户（支持 Supabase 和本地存储）
+        async function getAllUsers() {
+            if (supabase) {
+                // 从 Supabase 获取
+                try {
+                    const { data, error } = await supabase
+                        .from('users')
+                        .select('*')
+                        .order('created_at', { ascending: false });
+
+                    if (error) throw error;
+                    return data || [];
+                } catch (error) {
+                    console.error('❌ 获取用户失败:', error);
+                    return [];
+                }
+            } else {
+                // 从本地存储获取
+                const users = localStorage.getItem(STORAGE_KEYS.USERS);
+                return users ? JSON.parse(users) : [];
+            }
         }
 
-        // 保存所有用户
+        // 保存所有用户（仅用于本地存储模式）
         function saveAllUsers(users) {
-            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+            if (!supabase) {
+                localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+            }
         }
 
         // 获取当前用户
@@ -937,42 +1013,90 @@
             successDiv.classList.remove('hidden');
             const geo = await getGeolocation();
 
-            // 创建新用户
-            const newUser = {
-                id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                email: tempRegisterData.email,
-                username: tempRegisterData.username,
-                password: tempRegisterData.password,
-                ...geo,
-                avatar: null,
-                emailVerified: true,
-                createdAt: new Date().toISOString()
-            };
+            try {
+                let newUser;
 
-            const users = getAllUsers();
-            users.push(newUser);
-            saveAllUsers(users);
+                if (supabase) {
+                    // 使用 Supabase 保存用户
+                    successDiv.textContent = '正在创建账号...';
 
-            // 清除验证码
-            const codes = JSON.parse(localStorage.getItem(STORAGE_KEYS.VERIFICATION_CODES) || '{}');
-            delete codes[tempRegisterData.email];
-            localStorage.setItem(STORAGE_KEYS.VERIFICATION_CODES, JSON.stringify(codes));
+                    // 简单的密码哈希（实际应用中应该使用更安全的方法）
+                    const passwordHash = btoa(tempRegisterData.password);
 
-            successDiv.textContent = '注册成功！正在登录...';
+                    const { data, error } = await supabase
+                        .from('users')
+                        .insert([{
+                            username: tempRegisterData.username,
+                            email: tempRegisterData.email,
+                            password_hash: passwordHash,
+                            country: geo.country,
+                            country_code: geo.countryCode,
+                            city: geo.city,
+                            latitude: geo.latitude,
+                            longitude: geo.longitude,
+                            ip: geo.ip,
+                            avatar: null
+                        }])
+                        .select()
+                        .single();
 
-            setTimeout(() => {
-                const userForStorage = { ...newUser };
-                delete userForStorage.password;
-                saveCurrentUser(userForStorage);
+                    if (error) {
+                        if (error.code === '23505') { // 唯一约束冲突
+                            errorDiv.textContent = '用户名或邮箱已被使用';
+                            errorDiv.classList.remove('hidden');
+                            successDiv.classList.add('hidden');
+                            return;
+                        }
+                        throw error;
+                    }
 
-                // 默认开启自动登录
-                localStorage.setItem(STORAGE_KEYS.AUTO_LOGIN, 'true');
+                    newUser = data;
+                    console.log('✅ 用户已保存到 Supabase:', newUser);
+                } else {
+                    // 使用本地存储
+                    newUser = {
+                        id: 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        email: tempRegisterData.email,
+                        username: tempRegisterData.username,
+                        password: tempRegisterData.password,
+                        ...geo,
+                        avatar: null,
+                        emailVerified: true,
+                        createdAt: new Date().toISOString()
+                    };
 
-                window.location.reload();
-            }, 1000);
+                    const users = await getAllUsers();
+                    users.push(newUser);
+                    saveAllUsers(users);
+                }
+
+                // 清除验证码
+                const codes = JSON.parse(localStorage.getItem(STORAGE_KEYS.VERIFICATION_CODES) || '{}');
+                delete codes[tempRegisterData.email];
+                localStorage.setItem(STORAGE_KEYS.VERIFICATION_CODES, JSON.stringify(codes));
+
+                successDiv.textContent = '注册成功！正在登录...';
+
+                setTimeout(() => {
+                    const userForStorage = { ...newUser };
+                    delete userForStorage.password;
+                    delete userForStorage.password_hash;
+                    saveCurrentUser(userForStorage);
+
+                    // 默认开启自动登录
+                    localStorage.setItem(STORAGE_KEYS.AUTO_LOGIN, 'true');
+
+                    window.location.reload();
+                }, 1000);
+            } catch (error) {
+                console.error('❌ 注册失败:', error);
+                errorDiv.textContent = '注册失败：' + error.message;
+                errorDiv.classList.remove('hidden');
+                successDiv.classList.add('hidden');
+            }
         }
 
-        function handleLogin(event) {
+        async function handleLogin(event) {
             event.preventDefault();
 
             const email = document.getElementById('login-email').value.trim();
@@ -982,27 +1106,57 @@
             const errorDiv = document.getElementById('login-error');
             errorDiv.classList.add('hidden');
 
-            const users = getAllUsers();
-            const user = users.find(u => u.email === email && u.password === password);
+            try {
+                let user;
 
-            if (!user) {
-                errorDiv.textContent = '邮箱或密码错误';
+                if (supabase) {
+                    // 从 Supabase 验证
+                    const passwordHash = btoa(password);
+
+                    const { data, error } = await supabase
+                        .from('users')
+                        .select('*')
+                        .eq('email', email)
+                        .eq('password_hash', passwordHash)
+                        .single();
+
+                    if (error || !data) {
+                        errorDiv.textContent = '邮箱或密码错误';
+                        errorDiv.classList.remove('hidden');
+                        return;
+                    }
+
+                    user = data;
+                } else {
+                    // 从本地存储验证
+                    const users = await getAllUsers();
+                    user = users.find(u => u.email === email && u.password === password);
+
+                    if (!user) {
+                        errorDiv.textContent = '邮箱或密码错误';
+                        errorDiv.classList.remove('hidden');
+                        return;
+                    }
+                }
+
+                const userForStorage = { ...user };
+                delete userForStorage.password;
+                delete userForStorage.password_hash;
+                saveCurrentUser(userForStorage);
+
+                // 保存自动登录设置
+                if (rememberMe) {
+                    localStorage.setItem(STORAGE_KEYS.AUTO_LOGIN, 'true');
+                } else {
+                    localStorage.removeItem(STORAGE_KEYS.AUTO_LOGIN);
+                }
+
+                window.location.reload();
+            } catch (error) {
+                console.error('❌ 登录失败:', error);
+                errorDiv.textContent = '登录失败：' + error.message;
                 errorDiv.classList.remove('hidden');
-                return;
             }
-
-            const userForStorage = { ...user };
-            delete userForStorage.password;
-            saveCurrentUser(userForStorage);
-
-            // 保存自动登录设置
-            if (rememberMe) {
-                localStorage.setItem(STORAGE_KEYS.AUTO_LOGIN, 'true');
-            } else {
-                localStorage.removeItem(STORAGE_KEYS.AUTO_LOGIN);
-            }
-
-            window.location.reload();
         }
 
         function logout() {
@@ -1183,7 +1337,7 @@
         // ==================== 3D地球 ====================
         let globe;
 
-        function initGlobe() {
+        async function initGlobe() {
             console.log('🌍 开始初始化地球...');
             const container = document.getElementById('globe-container');
 
@@ -1198,7 +1352,7 @@
             console.log('✅ Globe.GL 库已加载');
 
             // 准备用户数据
-            const users = getAllUsers();
+            const users = await getAllUsers();
             const markerData = [];
 
             console.log(`👥 总用户数: ${users.length}`);
@@ -1448,11 +1602,11 @@
 
 
         // ==================== 统计更新 ====================
-        function updateStats() {
-            const users = getAllUsers();
+        async function updateStats() {
+            const users = await getAllUsers();
             // 只统计有位置信息的真实用户
             const realUsers = users.filter(u => u.latitude && u.longitude && u.latitude !== 0 && u.longitude !== 0);
-            const countries = new Set(realUsers.map(u => u.countryCode).filter(c => c));
+            const countries = new Set(realUsers.map(u => u.countryCode || u.country_code).filter(c => c));
 
             document.getElementById('total-users').textContent = realUsers.length;
             document.getElementById('total-countries').textContent = countries.size;
@@ -1491,10 +1645,15 @@
                 }
 
                 // 初始化3D地球
-                initGlobe();
+                await initGlobe();
 
                 // 更新统计
-                updateStats();
+                await updateStats();
+
+                // 启动实时监听
+                if (supabase) {
+                    startRealtimeListener();
+                }
 
                 // 隐藏加载动画
                 setTimeout(() => {
@@ -1502,6 +1661,58 @@
                 }, 500);
             }
         });
+
+        // ==================== 实时监听 ====================
+        function startRealtimeListener() {
+            if (!supabase) return;
+
+            console.log('🔄 启动实时监听...');
+
+            // 订阅用户表的变化
+            realtimeChannel = supabase
+                .channel('users-changes')
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*', // 监听所有事件（INSERT, UPDATE, DELETE）
+                        schema: 'public',
+                        table: 'users'
+                    },
+                    async (payload) => {
+                        console.log('🔔 数据库变化:', payload);
+
+                        if (payload.eventType === 'INSERT') {
+                            console.log('✅ 新用户注册:', payload.new);
+                        } else if (payload.eventType === 'UPDATE') {
+                            console.log('🔄 用户更新:', payload.new);
+                        } else if (payload.eventType === 'DELETE') {
+                            console.log('❌ 用户删除:', payload.old);
+                        }
+
+                        // 重新加载地球和统计
+                        await initGlobe();
+                        await updateStats();
+                    }
+                )
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        console.log('✅ 实时监听已启动');
+                    } else if (status === 'CHANNEL_ERROR') {
+                        console.error('❌ 实时监听错误');
+                    } else if (status === 'TIMED_OUT') {
+                        console.error('⏱️ 实时监听超时');
+                    }
+                });
+        }
+
+        // 停止实时监听
+        function stopRealtimeListener() {
+            if (realtimeChannel) {
+                supabase.removeChannel(realtimeChannel);
+                realtimeChannel = null;
+                console.log('🛑 实时监听已停止');
+            }
+        }
 
         // 点击模态框外部关闭
         document.addEventListener('click', (e) => {

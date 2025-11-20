@@ -475,7 +475,7 @@
     <!-- 加载动画 -->
     <div id="loading">
         <div class="spinner"></div>
-        <div class="loading-text">加载中...</div>
+        <div class="loading-text" id="loading-text">加载中...</div>
     </div>
 
     <!-- 导航栏 -->
@@ -637,17 +637,24 @@
         let realtimeChannel = null;
 
         // 检查 Supabase 配置
-        const isSupabaseConfigured = SUPABASE_CONFIG &&
+        const isSupabaseConfigured = typeof SUPABASE_CONFIG !== 'undefined' &&
+            SUPABASE_CONFIG &&
             SUPABASE_CONFIG.URL !== 'YOUR_SUPABASE_URL' &&
             SUPABASE_CONFIG.ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
 
         if (isSupabaseConfigured) {
-            // 初始化 Supabase 客户端
-            supabase = window.supabase.createClient(
-                SUPABASE_CONFIG.URL,
-                SUPABASE_CONFIG.ANON_KEY
-            );
-            console.log('✅ Supabase 已初始化 - 实时模式');
+            try {
+                // 初始化 Supabase 客户端
+                supabase = window.supabase.createClient(
+                    SUPABASE_CONFIG.URL,
+                    SUPABASE_CONFIG.ANON_KEY
+                );
+                console.log('✅ Supabase 已初始化 - 实时模式');
+            } catch (error) {
+                console.error('❌ Supabase 初始化失败:', error);
+                console.warn('⚠️ 切换到本地存储模式');
+                supabase = null;
+            }
         } else {
             console.warn('⚠️ Supabase 未配置 - 使用本地存储模式');
         }
@@ -1616,49 +1623,71 @@
 
         // ==================== 初始化 ====================
         window.addEventListener('DOMContentLoaded', async () => {
-            const currentUser = getCurrentUser();
-            const autoLogin = localStorage.getItem(STORAGE_KEYS.AUTO_LOGIN) === 'true';
+            const loadingText = document.getElementById('loading-text');
 
-            if (!currentUser || !autoLogin) {
-                // 未登录或未开启自动登录，显示登录界面
-                if (currentUser && !autoLogin) {
-                    // 有用户数据但未开启自动登录，清除会话
-                    clearCurrentUser();
-                }
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('login-modal').classList.add('active');
-            } else {
-                // 已登录且开启自动登录，显示主界面
-                document.getElementById('navbar').classList.remove('hidden');
-                document.getElementById('globe-container').classList.remove('hidden');
-                document.getElementById('stats').classList.remove('hidden');
+            try {
+                loadingText.textContent = '正在初始化...';
 
-                // 更新导航栏
-                document.getElementById('user-name').textContent = currentUser.username;
-                const navAvatar = document.getElementById('user-avatar');
-                if (currentUser.avatar) {
-                    navAvatar.style.backgroundImage = `url(${currentUser.avatar})`;
-                    navAvatar.style.backgroundSize = 'cover';
-                    navAvatar.textContent = '';
+                const currentUser = getCurrentUser();
+                const autoLogin = localStorage.getItem(STORAGE_KEYS.AUTO_LOGIN) === 'true';
+
+                if (!currentUser || !autoLogin) {
+                    // 未登录或未开启自动登录，显示登录界面
+                    if (currentUser && !autoLogin) {
+                        // 有用户数据但未开启自动登录，清除会话
+                        clearCurrentUser();
+                    }
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('login-modal').classList.add('active');
                 } else {
-                    navAvatar.textContent = currentUser.username.charAt(0).toUpperCase();
+                    // 已登录且开启自动登录，显示主界面
+                    loadingText.textContent = '正在加载用户数据...';
+
+                    document.getElementById('navbar').classList.remove('hidden');
+                    document.getElementById('globe-container').classList.remove('hidden');
+                    document.getElementById('stats').classList.remove('hidden');
+
+                    // 更新导航栏
+                    document.getElementById('user-name').textContent = currentUser.username;
+                    const navAvatar = document.getElementById('user-avatar');
+                    if (currentUser.avatar) {
+                        navAvatar.style.backgroundImage = `url(${currentUser.avatar})`;
+                        navAvatar.style.backgroundSize = 'cover';
+                        navAvatar.textContent = '';
+                    } else {
+                        navAvatar.textContent = currentUser.username.charAt(0).toUpperCase();
+                    }
+
+                    // 初始化3D地球
+                    loadingText.textContent = '正在加载3D地球...';
+                    await initGlobe();
+
+                    // 更新统计
+                    loadingText.textContent = '正在更新统计...';
+                    await updateStats();
+
+                    // 启动实时监听
+                    if (supabase) {
+                        loadingText.textContent = '正在启动实时监听...';
+                        startRealtimeListener();
+                    }
+
+                    // 隐藏加载动画
+                    loadingText.textContent = '完成！';
+                    setTimeout(() => {
+                        document.getElementById('loading').style.display = 'none';
+                    }, 500);
                 }
+            } catch (error) {
+                console.error('❌ 初始化失败:', error);
+                loadingText.textContent = '加载失败，请刷新页面';
+                loadingText.style.color = '#ef4444';
 
-                // 初始化3D地球
-                await initGlobe();
-
-                // 更新统计
-                await updateStats();
-
-                // 启动实时监听
-                if (supabase) {
-                    startRealtimeListener();
-                }
-
-                // 隐藏加载动画
+                // 5秒后自动隐藏加载页面，显示登录界面
                 setTimeout(() => {
                     document.getElementById('loading').style.display = 'none';
-                }, 500);
+                    document.getElementById('login-modal').classList.add('active');
+                }, 5000);
             }
         });
 

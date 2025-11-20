@@ -629,6 +629,9 @@
         (function() {
             if (EMAILJS_CONFIG.PUBLIC_KEY !== 'YOUR_PUBLIC_KEY') {
                 emailjs.init(EMAILJS_CONFIG.PUBLIC_KEY);
+                console.log('✅ EmailJS 已初始化');
+            } else {
+                console.warn('⚠️ EmailJS 未配置 - 使用演示模式');
             }
         })();
 
@@ -854,7 +857,7 @@
             }
 
             // 检查用户名是否已存在
-            const users = getAllUsers();
+            const users = await getAllUsers();
             if (users.some(u => u.username === username)) {
                 errorDiv.textContent = '用户名已被使用';
                 errorDiv.classList.remove('hidden');
@@ -880,6 +883,13 @@
             sendBtn.textContent = '发送中...';
 
             try {
+                console.log('📧 准备发送验证码...');
+                console.log('EmailJS 配置:', {
+                    PUBLIC_KEY: EMAILJS_CONFIG.PUBLIC_KEY.substring(0, 10) + '...',
+                    SERVICE_ID: EMAILJS_CONFIG.SERVICE_ID,
+                    TEMPLATE_ID: EMAILJS_CONFIG.TEMPLATE_ID
+                });
+
                 // 检查是否配置了EmailJS
                 if (EMAILJS_CONFIG.PUBLIC_KEY === 'YOUR_PUBLIC_KEY') {
                     // 演示模式
@@ -890,6 +900,7 @@
                     successDiv.classList.remove('hidden');
                 } else {
                     // 真实发送邮件
+                    console.log('📧 使用 EmailJS 发送邮件...');
                     const templateParams = {
                         to_email: email,
                         to_name: username,
@@ -899,13 +910,15 @@
                         message: `您的验证码是：${code}，有效期10分钟。`
                     };
 
+                    console.log('📧 邮件参数:', templateParams);
+
                     await emailjs.send(
                         EMAILJS_CONFIG.SERVICE_ID,
                         EMAILJS_CONFIG.TEMPLATE_ID,
                         templateParams
                     );
 
-                    console.log(`验证码已发送到 ${email}`);
+                    console.log(`✅ 验证码已发送到 ${email}`);
                     successDiv.textContent = '验证码已发送到您的邮箱，请查收';
                     successDiv.classList.remove('hidden');
                 }
@@ -1186,8 +1199,8 @@
         }
 
         // 查看所有用户数据（调试功能）
-        function debugUsers() {
-            const users = getAllUsers();
+        async function debugUsers() {
+            const users = await getAllUsers();
             console.log('=== 所有用户数据 ===');
             console.log(`总用户数: ${users.length}`);
             users.forEach((user, index) => {
@@ -1210,7 +1223,7 @@
         // 修复所有用户的位置信息
         async function fixAllUsersLocation() {
             console.log('🔧 开始修复所有用户的位置信息...');
-            const users = getAllUsers();
+            const users = await getAllUsers();
 
             for (let i = 0; i < users.length; i++) {
                 const user = users[i];
@@ -1305,9 +1318,9 @@
             }
 
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 const user = getCurrentUser();
-                const users = getAllUsers();
+                const users = await getAllUsers();
 
                 // 更新用户头像
                 const userIndex = users.findIndex(u => u.id === user.id);
